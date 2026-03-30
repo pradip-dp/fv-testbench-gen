@@ -77,8 +77,16 @@ For each testplan item, describe:
 
 - What behavior is being verified
 - Why it matters
+- Priority based on the criticality of the behavior and the likelihood that a failure would correspond to a real bug
 - Verification method
 - Expected proof target, observation, or completion criteria
+
+Each testplan item must include a priority label. Use a simple ordered scale such as `P0`, `P1`, `P2`, and `P3`, where lower numbers indicate higher priority. Assign priority by considering both:
+
+- How critical the behavior is to correct architectural or safety-relevant operation
+- How likely a failure in this area is to expose a meaningful real-world design bug rather than a purely theoretical issue
+
+Document the rationale for the chosen priority briefly enough that a reviewer can understand why the item was ranked at that level.
 
 Verification methods may include:
 
@@ -98,6 +106,8 @@ The testplan should cover:
 - Error handling or fault detection, if applicable
 - Illegal or unreachable scenarios that should be constrained by assumptions
 - End-to-end intent, not just local signal behavior
+
+Functional coverage planned through `cover` properties or equivalent formal cover goals must explicitly exercise the identified corner-case scenarios of the design. Do not limit cover planning to only nominal flows; include covers for meaningful boundary conditions, rare mode combinations, exceptional but legal behaviors, and other edge situations called out by the golden specification.
 
 The testplan should also say which requirements are best handled with direct SVA properties and which are better checked with a reference model or auxiliary logic.
 
@@ -132,8 +142,10 @@ Before finishing, confirm all of the following:
 - `golden_spec.md` captures interfaces, I/Os, parameters, modes, and major behavior
 - Specification gaps or ambiguities are clearly identified and resolved or flagged
 - `testplan.md` traces back to the golden specification
+- Every testplan item has an explicit priority with rationale based on criticality and real-bug likelihood
 - `formal/<dut>_tb.sv` traces back to the testplan
 - Normal behavior, corner cases, and configuration-dependent behavior are all covered
+- Functional cover goals include the important corner-case scenarios identified for the design
 - Assumptions are explicit and justified
 - The final harness is readable enough for a reviewer to audit requirement-to-property traceability
 
