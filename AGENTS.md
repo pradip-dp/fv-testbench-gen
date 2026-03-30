@@ -122,6 +122,8 @@ The formal testbench should:
 - Model only justified environment assumptions
 - Implement assertions, assumptions, and covers that trace back to testplan IDs
 - Use helper logic or a lightweight reference model where direct properties are not the best fit
+- Use a structured FPV setup where checks for each interface are placed in separate helper files, end-to-end checks are placed in separate helper files, and parameter-specific checks are placed in separate helper files as appropriate
+- Keep shared reference logic, scoreboarding helpers, and top-level orchestration in `formal/<dut>_tb.sv` unless there is a strong reason to factor them further
 - Stay focused on externally visible architectural behavior unless internal knowledge is necessary for a sound proof
 
 The testbench should be written with these principles:
@@ -130,6 +132,7 @@ The testbench should be written with these principles:
 - Do not assume away meaningful bugs
 - Prefer clarity and traceability over cleverness
 - Use parameterized or generated structure when multiple configurations require different checks
+- Organize the harness so reviewers can navigate interface-local checks, end-to-end intent checks, and parameter-dependent checks independently
 - Add short comments linking key properties to testplan items
 - Follow the property, reset-modeling, and symbolic-input conventions in [coding_guidelines.md](/Users/pradip/Documents/ChipAgents/fv_takehome/coding_guidelines.md)
 
@@ -147,6 +150,7 @@ Before finishing, confirm all of the following:
 - Normal behavior, corner cases, and configuration-dependent behavior are all covered
 - Functional cover goals include the important corner-case scenarios identified for the design
 - Assumptions are explicit and justified
+- The FPV harness structure cleanly separates interface checks, end-to-end checks, and parameter-specific checks, with shared reference logic remaining in the top testbench
 - The final harness is readable enough for a reviewer to audit requirement-to-property traceability
 
 ## Definition Of Done
