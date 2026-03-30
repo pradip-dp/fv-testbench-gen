@@ -33,6 +33,18 @@ module prim_fifo_sync_cfg_tb #(
   int unsigned ref_tail;
   logic [Width-1:0] ref_mem [0:ModelDepth-1];
 
+  logic cov_d1_bypass_seen;
+  logic cov_d1_stored_seen;
+  logic cov_d1_full_seen;
+  logic cov_d1_read_seen;
+  logic cov_d1_clear_seen;
+  logic cov_dgt1_fill_seen;
+  logic cov_dgt1_full_seen;
+  logic cov_dgt1_read_seen;
+  logic cov_dgt1_clear_seen;
+  logic cov_dgt1_clear_bypass_seen;
+  logic cov_dgt1_wrap_seen;
+
   wire wr_hs = wvalid_i && wready_o;
   wire rd_hs = rvalid_o && rready_i;
 
@@ -123,298 +135,249 @@ module prim_fifo_sync_cfg_tb #(
     end
   end
 
-  // TP-01
-  width_legal_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    1'b1 |-> (Width >= 1)
-  );
+  always_ff @(posedge clk_i) begin
+    if ($initstate) begin
+      assume (!rst_ni);
+    end else begin
+      if ($past($initstate)) begin
+        assume (rst_ni);
+      end
+      if ($past(rst_ni)) begin
+        assume (rst_ni);
+      end
+    end
 
-  // TP-01
-  depth0_requires_pass_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth == 0) |-> Pass
-  );
+    if (rst_ni && NeverClears) begin
+      // TP-02
+      assume (!clr_i);
+    end
+  end
 
-  // Formal reset model: start in reset, release immediately after init, never re-assert.
-  reset_starts_low_M: assume property (
-    @(posedge clk_i)
-    $initstate |-> !rst_ni
-  );
+  always_ff @(posedge clk_i) begin
+    if (rst_ni) begin
+      // TP-01
+      assert (Width >= 1);
 
-  reset_releases_after_init_M: assume property (
-    @(posedge clk_i)
-    $past($initstate) |-> rst_ni
-  );
+      // TP-01
+      if (Depth == 0) begin
+        assert (Pass);
+      end
 
-  reset_stays_high_M: assume property (
-    @(posedge clk_i)
-    (!$initstate && $past(rst_ni)) |-> rst_ni
-  );
+      // TP-22
+      if (Depth > 0) begin
+        assert (ref_count <= Depth);
+        assert (depth_o == ref_count[DepthW-1:0]);
+      end
 
-  // TP-02
-  never_clears_assume_A: assume property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    NeverClears |-> !clr_i
-  );
+      // TP-23
+      if (!Secure) begin
+        assert (err_o == 1'b0);
+      end
 
-  // TP-22
-  ref_count_in_range_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth > 0) |-> (ref_count <= Depth)
-  );
+      // TP-24
+      if (!$initstate && $past(!rst_ni) && Secure) begin
+        assert (err_o == 1'b0);
+      end
 
-  // TP-22
-  depth_matches_ref_count_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth > 0) |-> (depth_o == ref_count[DepthW-1:0])
-  );
+      // TP-07
+      if (Depth == 0) begin
+        assert (rvalid_o == wvalid_i);
+        assert (rdata_o == wdata_i);
+        assert (wready_o == rready_i);
+        assert (full_o == 1'b1);
+        assert (depth_o == '0);
+        assert (err_o == 1'b0);
+      end
 
-  // TP-23
-  nonsecure_err_zero_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    !Secure |-> (err_o == 1'b0)
-  );
+      // TP-08 / TP-09 / TP-20
+      if (Depth == 1) begin
+        assert (full_o == (ref_count == 1));
+        assert (wready_o == (ref_count == 0));
+        assert (rvalid_o == ((ref_count == 1) || (Pass && wvalid_i)));
 
-  // TP-24
-  secure_err_low_on_reset_release_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    Secure && $rose(rst_ni) |-> (err_o == 1'b0)
-  );
+        if (Pass && (ref_count == 0) && rvalid_o) begin
+          assert (rdata_o == wdata_i);
+        end
 
-  // TP-07
-  depth0_rvalid_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth == 0) |-> (rvalid_o == wvalid_i)
-  );
+        if ((ref_count == 1) && rvalid_o) begin
+          assert (rdata_o == ref_mem[ref_head]);
+        end
 
-  // TP-07
-  depth0_rdata_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth == 0) |-> (rdata_o == wdata_i)
-  );
+        if (OutputZeroIfEmpty && !rvalid_o) begin
+          assert (rdata_o == '0);
+        end
+      end
 
-  // TP-07
-  depth0_wready_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth == 0) |-> (wready_o == rready_i)
-  );
+      // TP-12 / TP-13 / TP-14 / TP-20
+      if (Depth > 1) begin
+        assert (full_o == (ref_count == Depth));
+        assert (wready_o == ((ref_count < Depth) && !exp_under_rst));
 
-  // TP-07
-  depth0_full_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth == 0) |-> (full_o == 1'b1)
-  );
+        if (Pass) begin
+          assert (rvalid_o == (((ref_count > 0) || wvalid_i) && !exp_under_rst));
 
-  // TP-07
-  depth0_depth_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth == 0) |-> (depth_o == '0)
-  );
+          if ((ref_count == 0) && rvalid_o) begin
+            assert (rdata_o == wdata_i);
+          end
 
-  // TP-07
-  depth0_err_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth == 0) |-> (err_o == 1'b0)
-  );
+          if ((ref_count > 0) && rvalid_o) begin
+            assert (rdata_o == ref_mem[ref_head]);
+          end
 
-  // TP-08
-  depth1_full_matches_ref_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth == 1) |-> (full_o == (ref_count == 1))
-  );
+          if (OutputZeroIfEmpty && (ref_count == 0) && !wvalid_i) begin
+            assert (rdata_o == '0);
+          end
+        end else begin
+          assert (rvalid_o == (ref_count > 0));
 
-  // TP-08
-  depth1_wready_matches_ref_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth == 1) |-> (wready_o == (ref_count == 0))
-  );
+          if (ref_count > 0) begin
+            assert (rdata_o == ref_mem[ref_head]);
+          end
 
-  // TP-08
-  depth1_rvalid_matches_mode_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth == 1) |-> (rvalid_o == ((ref_count == 1) || (Pass && wvalid_i)))
-  );
+          if (OutputZeroIfEmpty && (ref_count == 0)) begin
+            assert (rdata_o == '0);
+          end
+        end
+      end
 
-  // TP-09
-  depth1_pass_bypass_data_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth == 1) && Pass && (ref_count == 0) && rvalid_o |-> (rdata_o == wdata_i)
-  );
+      // TP-21
+      if ((Depth > 0) && rd_hs) begin
+        if (Pass && (ref_count == 0)) begin
+          assert (rdata_o == wdata_i);
+        end else begin
+          assert (ref_count > 0);
+          assert (rdata_o == ref_mem[ref_head]);
+        end
+      end
 
-  // TP-08
-  depth1_stored_data_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth == 1) && (ref_count == 1) && rvalid_o |-> (rdata_o == ref_mem[ref_head])
-  );
+      // TP-04 / TP-22
+      if ((Depth > 0) && wr_hs && !rd_hs) begin
+        assert (ref_count < Depth);
+      end
 
-  // TP-20
-  depth1_zero_if_empty_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth == 1) && OutputZeroIfEmpty && !rvalid_o |-> (rdata_o == '0)
-  );
+      // TP-04 / TP-22
+      if ((Depth > 0) && !wr_hs && rd_hs) begin
+        assert (ref_count > 0);
+      end
 
-  // TP-12
-  depthgt1_full_matches_ref_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth > 1) |-> (full_o == (ref_count == Depth))
-  );
+      // TP-10 / TP-17
+      if ((Depth > 0) && full_o) begin
+        assert (!wready_o);
+      end
+    end
+  end
 
-  // TP-12
-  depthgt1_wready_matches_ref_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth > 1) |-> (wready_o == ((ref_count < Depth) && !exp_under_rst))
-  );
-
-  // TP-13
-  depthgt1_pass_rvalid_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth > 1) && Pass |-> (rvalid_o == (((ref_count > 0) || wvalid_i) && !exp_under_rst))
-  );
-
-  // TP-13
-  depthgt1_pass_bypass_data_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth > 1) && Pass && (ref_count == 0) && rvalid_o |-> (rdata_o == wdata_i)
-  );
-
-  // TP-13
-  depthgt1_pass_stored_data_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth > 1) && Pass && (ref_count > 0) && rvalid_o |-> (rdata_o == ref_mem[ref_head])
-  );
-
-  // TP-14
-  depthgt1_nopass_rvalid_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth > 1) && !Pass |-> (rvalid_o == (ref_count > 0))
-  );
-
-  // TP-14
-  depthgt1_nopass_stored_data_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth > 1) && !Pass && (ref_count > 0) |-> (rdata_o == ref_mem[ref_head])
-  );
-
-  // TP-20
-  depthgt1_zero_if_empty_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth > 1) && OutputZeroIfEmpty && !Pass && (ref_count == 0) |-> (rdata_o == '0)
-  );
-
-  // TP-20
-  depthgt1_pass_zero_if_empty_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth > 1) && OutputZeroIfEmpty && Pass && (ref_count == 0) && !wvalid_i |-> (rdata_o == '0)
-  );
-
-  // TP-21
-  read_data_matches_reference_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth > 0) && rd_hs && Pass && (ref_count == 0) |-> (rdata_o == wdata_i)
-  );
-
-  // TP-21
-  read_data_matches_stored_reference_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth > 0) && rd_hs && !(Pass && (ref_count == 0)) |-> ((ref_count > 0) && (rdata_o == ref_mem[ref_head]))
-  );
-
-  // TP-10 / TP-17
-  full_blocks_write_A: assert property (
-    @(posedge clk_i) disable iff (!rst_ni)
-    (Depth > 0) && full_o |-> !wready_o
-  );
-
-  generate
-    if (Depth == 0) begin : gen_depth0_covers
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      cov_d1_bypass_seen <= 1'b0;
+      cov_d1_stored_seen <= 1'b0;
+      cov_d1_full_seen <= 1'b0;
+      cov_d1_read_seen <= 1'b0;
+      cov_d1_clear_seen <= 1'b0;
+      cov_dgt1_fill_seen <= 1'b0;
+      cov_dgt1_full_seen <= 1'b0;
+      cov_dgt1_read_seen <= 1'b0;
+      cov_dgt1_clear_seen <= 1'b0;
+      cov_dgt1_clear_bypass_seen <= 1'b0;
+      cov_dgt1_wrap_seen <= 1'b0;
+    end else begin
       // TP-07 / TP-25
-      depth0_transfer_C: cover property (
-        @(posedge clk_i) disable iff (!rst_ni)
-        wvalid_i && rready_i && wr_hs && rd_hs
-      );
-    end
+      if ((Depth == 0) && wvalid_i && rready_i && wr_hs && rd_hs) begin
+        cover (1'b1);
+      end
 
-    if ((Depth == 1) && Pass) begin : gen_depth1_pass_covers
-      // TP-09
-      depth1_bypass_then_store_then_read_C: cover property (
-        @(posedge clk_i) disable iff (!rst_ni)
-        (ref_count == 0) && wvalid_i && !rready_i && wr_hs && !rd_hs
-        |-> ##1 (depth_o == 1)
-        ##1 rready_i && rd_hs
-      );
-    end
+      if ((Depth == 1) && Pass) begin
+        // TP-09
+        if ((ref_count == 0) && wvalid_i && !rready_i && wr_hs && !rd_hs) begin
+          cov_d1_bypass_seen <= 1'b1;
+        end
+        if (cov_d1_bypass_seen && (depth_o == 1)) begin
+          cov_d1_stored_seen <= 1'b1;
+        end
+        if (cov_d1_stored_seen && rready_i && rd_hs) begin
+          cover (1'b1);
+        end
+      end
 
-    if (Depth == 1) begin : gen_depth1_common_covers
-      // TP-10
-      depth1_read_then_write_after_full_C: cover property (
-        @(posedge clk_i) disable iff (!rst_ni)
-        full_o
-        ##1 rd_hs
-        ##1 wr_hs
-      );
+      if (Depth == 1) begin
+        // TP-10
+        if (full_o) begin
+          cov_d1_full_seen <= 1'b1;
+        end
+        if (cov_d1_full_seen && rd_hs) begin
+          cov_d1_read_seen <= 1'b1;
+        end
+        if (cov_d1_read_seen && wr_hs) begin
+          cover (1'b1);
+        end
 
-      // TP-18
-      depth1_clear_flush_C: cover property (
-        @(posedge clk_i) disable iff (!rst_ni)
-        (ref_count == 1) && clr_i
-        |-> ##1 (depth_o == 0)
-      );
-    end
+        // TP-18
+        if ((ref_count == 1) && clr_i) begin
+          cov_d1_clear_seen <= 1'b1;
+        end
+        if (cov_d1_clear_seen && (depth_o == 0)) begin
+          cover (1'b1);
+        end
+      end
 
-    if ((Depth > 1) && Pass) begin : gen_depthgt1_pass_covers
-      // TP-13 / TP-15
-      depthgt1_empty_bypass_transfer_C: cover property (
-        @(posedge clk_i) disable iff (!rst_ni)
-        !exp_under_rst && (ref_count == 0) && wvalid_i && rready_i && wr_hs && rd_hs
-      );
+      if ((Depth > 1) && Pass) begin
+        // TP-13 / TP-15
+        if (!exp_under_rst && (ref_count == 0) && wvalid_i && rready_i && wr_hs && rd_hs) begin
+          cover (1'b1);
+        end
 
-      // TP-18
-      depthgt1_clear_during_bypass_C: cover property (
-        @(posedge clk_i) disable iff (!rst_ni)
-        !exp_under_rst && (ref_count == 0) && clr_i && wvalid_i && rready_i && wr_hs && rd_hs
-        |-> ##1 (depth_o == 0)
-      );
-    end
+        // TP-18
+        if (!exp_under_rst && (ref_count == 0) && clr_i && wvalid_i && rready_i && wr_hs && rd_hs) begin
+          cov_dgt1_clear_bypass_seen <= 1'b1;
+        end
+        if (cov_dgt1_clear_bypass_seen && (depth_o == 0)) begin
+          cover (1'b1);
+        end
+      end
 
-    if (Depth > 1) begin : gen_depthgt1_common_covers
-      // TP-17 / TP-25
-      depthgt1_fill_read_write_C: cover property (
-        @(posedge clk_i) disable iff (!rst_ni)
-        (ref_count == Depth - 1) && wr_hs
-        ##1 full_o
-        ##1 rd_hs
-        ##1 wr_hs
-      );
+      if (Depth > 1) begin
+        // TP-17 / TP-25
+        if ((ref_count == Depth - 1) && wr_hs) begin
+          cov_dgt1_fill_seen <= 1'b1;
+        end
+        if (cov_dgt1_fill_seen && full_o) begin
+          cov_dgt1_full_seen <= 1'b1;
+        end
+        if (cov_dgt1_full_seen && rd_hs) begin
+          cov_dgt1_read_seen <= 1'b1;
+        end
+        if (cov_dgt1_read_seen && wr_hs) begin
+          cover (1'b1);
+        end
 
-      // TP-16
-      depthgt1_simultaneous_rd_wr_C: cover property (
-        @(posedge clk_i) disable iff (!rst_ni)
-        (ref_count > 0) && (ref_count < Depth) && wr_hs && rd_hs
-      );
+        // TP-16
+        if ((ref_count > 0) && (ref_count < Depth) && wr_hs && rd_hs) begin
+          cover (1'b1);
+        end
 
-      // TP-18
-      depthgt1_clear_flush_C: cover property (
-        @(posedge clk_i) disable iff (!rst_ni)
-        (ref_count > 0) && clr_i
-        |-> ##1 (depth_o == 0)
-      );
+        // TP-18
+        if ((ref_count > 0) && clr_i) begin
+          cov_dgt1_clear_seen <= 1'b1;
+        end
+        if (cov_dgt1_clear_seen && (depth_o == 0)) begin
+          cover (1'b1);
+        end
 
-      // TP-25
-      depthgt1_wrap_tail_C: cover property (
-        @(posedge clk_i) disable iff (!rst_ni)
-        (ref_tail == Depth - 1) && wr_hs
-        |-> ##1 (ref_tail == 0)
-      );
-    end
+        // TP-25
+        if ((ref_tail == Depth - 1) && wr_hs) begin
+          cov_dgt1_wrap_seen <= 1'b1;
+        end
+        if (cov_dgt1_wrap_seen && (ref_tail == 0)) begin
+          cover (1'b1);
+        end
+      end
 
-    if ((Depth > 0) && OutputZeroIfEmpty) begin : gen_zero_if_empty_cover
       // TP-20
-      zero_if_empty_C: cover property (
-        @(posedge clk_i) disable iff (!rst_ni)
-        !rvalid_o && (rdata_o == '0)
-      );
+      if ((Depth > 0) && OutputZeroIfEmpty && !rvalid_o && (rdata_o == '0)) begin
+        cover (1'b1);
+      end
     end
-  endgenerate
+  end
 
 endmodule
 

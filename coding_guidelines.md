@@ -8,41 +8,60 @@ Use these guidelines when implementing step 3 from [AGENTS.md](/Users/pradip/Doc
 
 ## Property Style
 
-- Use explicit named concurrent properties only.
+- Target the open-source SymbiYosys/Yosys-supported subset of SystemVerilog formal constructs.
 - Do not use assertion macros in the formal testbench.
-- Do not use procedural or immediate `assert`, `assume`, or `cover`.
-- Prefer this format for all checks:
+- Do not use concurrent SVA syntax such as:
+  - `assert property (...)`
+  - `assume property (...)`
+  - `cover property (...)`
+  - `disable iff`
+  - implication operators such as `|->` or `|=>`
+  - sequence delays such as `##1`
+- Prefer procedural immediate checks inside clocked `always` / `always_ff` blocks.
+- Name checks with nearby comments or stable labels when helpful for traceability.
+- Prefer this format for assertions:
 
 ```systemverilog
-property_name: assert property (
-  @(posedge clk_i) disable iff (!rst_ni)
-  a |-> b
-);
+always_ff @(posedge clk_i) begin
+  if (rst_ni) begin
+    // TP-XX: explain intent
+    assert (expr);
+  end
+end
 ```
 
-- The same structure should be used for assumptions and covers:
+- Use the same style for assumptions and covers:
 
 ```systemverilog
-property_name: assume property (
-  @(posedge clk_i) disable iff (!rst_ni)
-  a |-> b
-);
-
-property_name: cover property (
-  @(posedge clk_i) disable iff (!rst_ni)
-  a |-> ##1 b
-);
+always_ff @(posedge clk_i) begin
+  if (rst_ni) begin
+    assume (expr);
+    cover (expr);
+  end
+end
 ```
 
-- Do not use `|=>`. Use `|-> ##1` instead when next-cycle behavior is intended.
+- For next-cycle or temporal intent, use helper state, delayed registers, or `$past(...)` rather than concurrent property syntax.
+- Example:
+
+```systemverilog
+always_ff @(posedge clk_i) begin
+  if (rst_ni) begin
+    if ($past(valid_a)) begin
+      assert (valid_b);
+    end
+  end
+end
+```
 
 ## Clock And Reset Modeling
 
 - Do not use `initial` blocks in the formal testbench.
 - Do not use simulation-style `#` delays for clock or reset startup.
 - Model reset behavior with explicit assumptions instead of procedural startup code.
-- Use `@(posedge clk_i)` as the clocking event for properties.
-- Use `disable iff (!rst_ni)` on assertions and covers unless there is a deliberate reason not to.
+- Use `@(posedge clk_i)` as the clocking event for formal checks.
+- Gate assertions, assumptions, and covers explicitly with `if (rst_ni)` or equivalent reset-valid logic.
+- If startup behavior matters, prefer `$initstate` assumptions and explicit post-reset validity tracking over concurrent reset guards.
 
 ## Symbolic Inputs
 
@@ -59,7 +78,7 @@ property_name: cover property (
 ## Traceability
 
 - Name properties clearly and consistently.
-- Add short comments linking properties to testplan IDs where helpful.
+- Add short comments linking checks to testplan IDs where helpful.
 - Keep the harness readable enough that a reviewer can map each property back to the verification plan.
 
 ## General Testbench Style
