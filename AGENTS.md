@@ -20,6 +20,7 @@ Do not skip steps. Each step is an explicit input to the next one.
 - Reconcile documentation and RTL deliberately. If they disagree, document the discrepancy and justify the chosen interpretation.
 - Do not jump directly into writing assertions or testbench code before the golden specification and testplan exist.
 - Prefer documenting uncertainty over silently guessing.
+- Follow the formal testbench coding conventions in [coding_guidelines.md](/Users/pradip/Documents/ChipAgents/fv_takehome/coding_guidelines.md) when implementing step 3 artifacts.
 
 ## Inputs
 
@@ -120,6 +121,7 @@ The testbench should be written with these principles:
 - Prefer clarity and traceability over cleverness
 - Use parameterized or generated structure when multiple configurations require different checks
 - Add short comments linking key properties to testplan items
+- Follow the property, reset-modeling, and symbolic-input conventions in [coding_guidelines.md](/Users/pradip/Documents/ChipAgents/fv_takehome/coding_guidelines.md)
 
 Unless explicitly requested, do not modify the RTL just to make proofs pass. If the implementation appears buggy or inconsistent with the golden specification, document that as a finding.
 
