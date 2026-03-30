@@ -31,7 +31,8 @@ module prim_fifo_sync_cfg_tb #(
   int unsigned ref_count;
   int unsigned ref_head;
   int unsigned ref_tail;
-  logic [Width-1:0] ref_mem [0:ModelDepth-1];
+  logic [ModelDepth*Width-1:0] ref_mem_flat;
+  logic [Width-1:0] ref_head_data;
 
   logic cov_d1_bypass_seen;
   logic cov_d1_stored_seen;
@@ -44,19 +45,22 @@ module prim_fifo_sync_cfg_tb #(
   logic cov_dgt1_clear_seen;
   logic cov_dgt1_clear_bypass_seen;
   logic cov_dgt1_wrap_seen;
+  logic f_past_valid = 1'b0;
+  logic f_prev_rst_ni = 1'b0;
+  integer ref_rd_idx;
+  integer ref_wr_idx;
+
+  always_comb begin
+    ref_head_data = '0;
+    for (ref_rd_idx = 0; ref_rd_idx < ModelDepth; ref_rd_idx++) begin
+      if (ref_head == ref_rd_idx) begin
+        ref_head_data = ref_mem_flat[ref_rd_idx*Width +: Width];
+      end
+    end
+  end
 
   wire wr_hs = wvalid_i && wready_o;
   wire rd_hs = rvalid_o && rready_i;
-
-  function automatic int unsigned bump_idx(input int unsigned idx);
-    if (ModelDepth <= 1) begin
-      bump_idx = 0;
-    end else if (idx == ModelDepth - 1) begin
-      bump_idx = 0;
-    end else begin
-      bump_idx = idx + 1;
-    end
-  endfunction
 
   prim_fifo_sync #(
     .Width(Width),
@@ -101,31 +105,45 @@ module prim_fifo_sync_cfg_tb #(
       ref_count <= 0;
       ref_head <= 0;
       ref_tail <= 0;
+      ref_mem_flat <= '0;
     end else if (Depth > 0) begin
       if (clr_i) begin
         ref_count <= 0;
         ref_head <= 0;
         ref_tail <= 0;
+        ref_mem_flat <= '0;
       end else begin
         unique case ({wr_hs, rd_hs})
           2'b10: begin
             if (ref_count < Depth) begin
-              ref_mem[ref_tail] <= wdata_i;
-              ref_tail <= bump_idx(ref_tail);
+              for (ref_wr_idx = 0; ref_wr_idx < ModelDepth; ref_wr_idx++) begin
+                if (ref_tail == ref_wr_idx) begin
+                  ref_mem_flat[ref_wr_idx*Width +: Width] <= wdata_i;
+                end
+              end
+              ref_tail <= (ModelDepth <= 1) ? 0 :
+                          ((ref_tail == ModelDepth - 1) ? 0 : (ref_tail + 1));
               ref_count <= ref_count + 1;
             end
           end
           2'b01: begin
             if (ref_count > 0) begin
-              ref_head <= bump_idx(ref_head);
+              ref_head <= (ModelDepth <= 1) ? 0 :
+                          ((ref_head == ModelDepth - 1) ? 0 : (ref_head + 1));
               ref_count <= ref_count - 1;
             end
           end
           2'b11: begin
             if (!(Pass && (ref_count == 0)) && (ref_count > 0) && (ref_count < Depth)) begin
-              ref_mem[ref_tail] <= wdata_i;
-              ref_tail <= bump_idx(ref_tail);
-              ref_head <= bump_idx(ref_head);
+              for (ref_wr_idx = 0; ref_wr_idx < ModelDepth; ref_wr_idx++) begin
+                if (ref_tail == ref_wr_idx) begin
+                  ref_mem_flat[ref_wr_idx*Width +: Width] <= wdata_i;
+                end
+              end
+              ref_tail <= (ModelDepth <= 1) ? 0 :
+                          ((ref_tail == ModelDepth - 1) ? 0 : (ref_tail + 1));
+              ref_head <= (ModelDepth <= 1) ? 0 :
+                          ((ref_head == ModelDepth - 1) ? 0 : (ref_head + 1));
             end
           end
           default: begin
@@ -136,21 +154,19 @@ module prim_fifo_sync_cfg_tb #(
   end
 
   always_ff @(posedge clk_i) begin
-    if ($initstate) begin
+    if (!f_past_valid) begin
       assume (!rst_ni);
     end else begin
-      if ($past($initstate)) begin
-        assume (rst_ni);
-      end
-      if ($past(rst_ni)) begin
-        assume (rst_ni);
-      end
+      assume (rst_ni);
     end
 
     if (rst_ni && NeverClears) begin
       // TP-02
       assume (!clr_i);
     end
+
+    f_past_valid <= 1'b1;
+    f_prev_rst_ni <= rst_ni;
   end
 
   always_ff @(posedge clk_i) begin
@@ -175,7 +191,7 @@ module prim_fifo_sync_cfg_tb #(
       end
 
       // TP-24
-      if (!$initstate && $past(!rst_ni) && Secure) begin
+      if (f_past_valid && !f_prev_rst_ni && Secure) begin
         assert (err_o == 1'b0);
       end
 
@@ -200,7 +216,7 @@ module prim_fifo_sync_cfg_tb #(
         end
 
         if ((ref_count == 1) && rvalid_o) begin
-          assert (rdata_o == ref_mem[ref_head]);
+          assert (rdata_o == ref_head_data);
         end
 
         if (OutputZeroIfEmpty && !rvalid_o) begin
@@ -221,7 +237,7 @@ module prim_fifo_sync_cfg_tb #(
           end
 
           if ((ref_count > 0) && rvalid_o) begin
-            assert (rdata_o == ref_mem[ref_head]);
+            assert (rdata_o == ref_head_data);
           end
 
           if (OutputZeroIfEmpty && (ref_count == 0) && !wvalid_i) begin
@@ -231,7 +247,7 @@ module prim_fifo_sync_cfg_tb #(
           assert (rvalid_o == (ref_count > 0));
 
           if (ref_count > 0) begin
-            assert (rdata_o == ref_mem[ref_head]);
+            assert (rdata_o == ref_head_data);
           end
 
           if (OutputZeroIfEmpty && (ref_count == 0)) begin
@@ -246,7 +262,7 @@ module prim_fifo_sync_cfg_tb #(
           assert (rdata_o == wdata_i);
         end else begin
           assert (ref_count > 0);
-          assert (rdata_o == ref_mem[ref_head]);
+          assert (rdata_o == ref_head_data);
         end
       end
 

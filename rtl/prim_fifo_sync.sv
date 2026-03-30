@@ -181,7 +181,7 @@ module prim_fifo_sync #(
     assign fifo_incr_wptr = wvalid_i & wready_o;
     assign fifo_incr_rptr = rvalid_o & rready_i & ~under_rst;
 
-    logic [Depth-1:0][Width-1:0] storage;
+    logic [Width-1:0] storage [0:Depth-1];
     logic [Width-1:0] storage_rdata;
 
     assign storage_rdata = storage[fifo_rptr];

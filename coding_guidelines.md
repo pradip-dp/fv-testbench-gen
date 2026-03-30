@@ -54,6 +54,8 @@ always_ff @(posedge clk_i) begin
 end
 ```
 
+- Avoid using `$past(...)` or `$initstate` directly as procedural `if` conditions in stock Yosys when an equivalent helper-valid bit or sampled register can express the same intent more robustly.
+
 ## Clock And Reset Modeling
 
 - Do not use `initial` blocks in the formal testbench.
@@ -61,7 +63,8 @@ end
 - Model reset behavior with explicit assumptions instead of procedural startup code.
 - Use `@(posedge clk_i)` as the clocking event for formal checks.
 - Gate assertions, assumptions, and covers explicitly with `if (rst_ni)` or equivalent reset-valid logic.
-- If startup behavior matters, prefer `$initstate` assumptions and explicit post-reset validity tracking over concurrent reset guards.
+- If startup behavior matters, prefer explicit post-reset validity tracking such as `f_past_valid` and sampled prior-cycle registers.
+- If `$initstate` is used, keep it in simple assumption expressions and avoid relying on it inside nested procedural control flow.
 
 ## Symbolic Inputs
 
@@ -87,3 +90,27 @@ end
 - Prefer interface-level checks over internal implementation coupling unless internal modeling is necessary.
 - Use helper logic or a small reference model when it simplifies end-to-end correctness checks.
 - Keep the testbench portable and standard-friendly where possible.
+
+## Yosys Syntax Notes
+
+- In package functions, assign to the function name instead of using `return`.
+
+```systemverilog
+function automatic integer vbits(integer value);
+  vbits = (value == 1) ? 1 : $clog2(value);
+endfunction
+```
+
+- Prefer unpacked memory declarations over packed multidimensional declarations when writing RTL that must be parsed by Yosys.
+
+```systemverilog
+logic [Width-1:0] storage [0:Depth-1];
+```
+
+- In formal reference models, prefer flat packed vectors plus explicit muxing over memories when warning-clean `yosys check` results are important.
+- If a reference model does use storage, explicitly reset or clear all tracked state so Yosys does not create undriven helper artifacts.
+- After significant syntax or modeling changes, run a Yosys elaboration check:
+
+```sh
+yosys -p 'read_verilog -formal -sv ...; hierarchy -check -top <tb_top>; proc; check'
+```
